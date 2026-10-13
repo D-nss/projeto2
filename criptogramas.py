@@ -1,5 +1,3 @@
-"""Criptogramas do anexo do enunciado para as três cifras escolhidas: (IV, criptograma em hexadecimal)."""
-
 CRIPTOGRAMAS = {
     "F01": [
         (0xf918fb59ce, "2312"),

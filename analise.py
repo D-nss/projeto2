@@ -1,124 +1,114 @@
-import importlib.util
 import os
 import random
-import feistel
+import importlib.util
 import spn
-import testes
-from cipher_base import (
-    BLOCK_SIZE,
-    FEISTEL_ROUNDS,
-    NIBBLE_SIZE,
-    SBOX_ENTRIES,
-    SPN_ROUNDS,
-)
-from criptogramas import mensagens
+import feistel
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+def importar_cifra(identificador):
+    pasta_origem = 'SPN'
+    if identificador.startswith('F'):
+        pasta_origem = 'Rede de Feistel'
 
-CHAVE_ANALISE = 0x23453456343453450124
-SEMENTE = 20251012
-TIPO = {"S": "SPN", "F": "Feistel"}
-RODADAS_OFICIAIS = {"S": SPN_ROUNDS, "F": FEISTEL_ROUNDS}
-
-def carregar_projeto(identificador):
-    pasta = "Rede de Feistel" if identificador.startswith("F") else "SPN"
-    caminho = os.path.join(RAIZ, pasta, identificador, "my_cipher.py")
-    especificacao = importlib.util.spec_from_file_location(f"cifra_{identificador}", caminho)
+    caminho_arquivo = os.path.join(pasta_origem, identificador, 'my_cipher.py')
+    especificacao = importlib.util.spec_from_file_location("modulo_cifra", caminho_arquivo)
     modulo = importlib.util.module_from_spec(especificacao)
     especificacao.loader.exec_module(modulo)
-    return modulo
 
-def construir(identificador, projeto, rodadas):
-    if identificador.startswith("S"):
-        return spn.SPN80(projeto.SBOX, projeto.SPN_PBOX, rodadas, CHAVE_ANALISE)
-    return feistel.Feistel80(projeto.SBOX, projeto.FEISTEL_PBOX, rodadas, CHAVE_ANALISE)
+    chave_mestra = 0x23453456343453450124
+    caixa_s = modulo.SBOX
+    
+    caixa_p = modulo.FEISTEL_PBOX
+    if identificador.startswith('S'):
+        caixa_p = modulo.SPN_PBOX
 
-def propriedades_sbox(sbox):
-    distintos = len(set(sbox))
-    ddt = max(
-        sum(1 for x in range(SBOX_ENTRIES) if sbox[x] ^ sbox[x ^ a] == b)
-        for a in range(1, SBOX_ENTRIES) for b in range(SBOX_ENTRIES)
-    )
-    lat = max(
-        abs(sum(
-            1 for x in range(SBOX_ENTRIES)
-            if bin(x & a).count("1") % 2 == bin(sbox[x] & b).count("1") % 2
-        ) - SBOX_ENTRIES // 2)
-        for a in range(SBOX_ENTRIES) for b in range(1, SBOX_ENTRIES)
-    )
-    return {"bijetora": distintos == SBOX_ENTRIES, "valores_distintos": distintos,
-            "ddt_max": ddt, "lat_vies_max": lat}
+    return caixa_s, caixa_p, chave_mestra
 
-def efeito_avalanche(identificador, projeto, rodadas, amostras=200):
-    cifra = construir(identificador, projeto, rodadas)
-    rng = random.Random(SEMENTE + rodadas)
+def analisar_efeito_avalanche(identificador, caixa_s, caixa_p, chave, rodadas, total_amostras=30):
+    if identificador.startswith('S'):
+        cifra = spn.SPN80(caixa_s, caixa_p, rodadas, chave)
+    else:
+        cifra = feistel.Feistel80(caixa_s, caixa_p, rodadas, chave)
 
-    soma = 0.0
-    minimo = 1.0
-    maximo = 0.0
-    quantidade = 0
-    muda = [[False] * BLOCK_SIZE for _ in range(BLOCK_SIZE)]
+    taxas_alteracao = []
+    dependencias = [[0] * 80 for _ in range(80)]
 
-    for _ in range(amostras):
-        claro = rng.getrandbits(BLOCK_SIZE)
-        base = cifra.encrypt_block(claro)
-        for bit_entrada in range(BLOCK_SIZE):
-            diferenca = base ^ cifra.encrypt_block(claro ^ (1 << bit_entrada))
-            fracao = bin(diferenca).count("1") / BLOCK_SIZE
-            soma += fracao
-            minimo = min(minimo, fracao)
-            maximo = max(maximo, fracao)
-            quantidade += 1
-            while diferenca:
-                bit_saida = (diferenca & -diferenca).bit_length() - 1
-                muda[bit_entrada][bit_saida] = True
-                diferenca &= diferenca - 1
+    for _ in range(total_amostras):
+        texto_claro = random.getrandbits(80)
+        texto_cifrado_base = cifra.encrypt_block(texto_claro)
 
-    nunca = sum(1 for linha in muda for mudou in linha if not mudou)
-    return {"media": soma / quantidade, "min": minimo, "max": maximo, "pares_fixos": nunca}
+        for indice_bit in range(80):
+            texto_cifrado_modificado = cifra.encrypt_block(texto_claro ^ (1 << indice_bit))
+            diferenca = texto_cifrado_base ^ texto_cifrado_modificado
+            
+            bits_diferentes = bin(diferenca).count('1')
+            taxas_alteracao.append(bits_diferentes / 80)
 
-def saida_em_volume(identificador, projeto, nbytes=20000):
-    cifra = construir(identificador, projeto, RODADAS_OFICIAIS[identificador[0]])
-    bloco_bytes = BLOCK_SIZE // 8
-    rng = random.Random(SEMENTE)
-    saida = bytearray()
-    while len(saida) < nbytes:
-        saida += cifra.encrypt_block(rng.getrandbits(BLOCK_SIZE)).to_bytes(bloco_bytes, "big")
-    return bytes(saida)
+            for bit_alvo in range(80):
+                if (diferenca >> bit_alvo) & 1:
+                    dependencias[indice_bit][bit_alvo] += 1
 
+    bits_inalterados = 0
+    for linha in range(80):
+        for coluna in range(80):
+            if dependencias[linha][coluna] == 0:
+                bits_inalterados += 1
 
-def formata(resultado):
-    def p(teste):
-        valor = resultado[teste]["p"]
-        return f"{valor:.4f}" if valor == valor else "  -  "
-    return f"monobit p={p('monobit')} | blocos p={p('blocos')} | corridas p={p('corridas')}"
+    total_taxas = len(taxas_alteracao)
+    media_geral = sum(taxas_alteracao) / total_taxas
+    variancia = sum((valor - media_geral) ** 2 for valor in taxas_alteracao) / total_taxas
+    desvio_padrao = variancia ** 0.5
 
-def relatorio(identificadores=("S01", "S02", "F01")):
-    for identificador in identificadores:
-        projeto = carregar_projeto(identificador)
-        tipo = TIPO[identificador[0]]
-        oficiais = RODADAS_OFICIAIS[identificador[0]]
-        print(f"\n===================== {identificador} ({tipo}, {oficiais} rodadas) =====================")
+    return media_geral, desvio_padrao, bits_inalterados
 
-        prop = propriedades_sbox(projeto.SBOX)
-        print("[ S-box / P-box ]")
-        print(f"  S-box: {'bijetora' if prop['bijetora'] else 'NÃO bijetora'}"
-              f" ({prop['valores_distintos']} valores distintos), "
-              f"DDT máx = {prop['ddt_max']}/16, viés linear máx = {prop['lat_vies_max']}/8")
+def calcular_estatisticas(texto_cifrado_hexa):
+    valor_inteiro = int(texto_cifrado_hexa, 16)
+    tamanho_desejado = len(texto_cifrado_hexa) * 4
+    sequencia_bits = bin(valor_inteiro)[2:].zfill(tamanho_desejado)
+    
+    tamanho_total = len(sequencia_bits)
+    media_peso_hamming = sequencia_bits.count('1') / tamanho_total
 
-        print("[ Efeito avalanche ]  (fração de bits do criptograma que muda por bit do claro invertido)")
-        for rodadas in range(1, 9):
-            av = efeito_avalanche(identificador, projeto, rodadas)
-            marca = "  <- rodadas oficiais" if rodadas == oficiais else ""
-            print(f"  R{rodadas}: média={av['media']:.4f} | min={av['min']:.4f} | max={av['max']:.4f}"
-                  f" | pares (entrada,saída) fixos={av['pares_fixos']:4d}/6400{marca}")
+    contagem_sequencias = [1]
+    for i in range(1, tamanho_total):
+        if sequencia_bits[i] == sequencia_bits[i-1]:
+            contagem_sequencias[-1] += 1
+        else:
+            contagem_sequencias.append(1)
 
-        print("[ Testes estatísticos nos criptogramas recebidos ]")
-        for indice, (_, criptograma) in enumerate(mensagens(identificador), start=1):
-            print(f"  msg {indice} ({len(criptograma):3d} bytes): {formata(testes.aplicar(criptograma))}")
+    total_grupos = len(contagem_sequencias)
+    media_sequencias = sum(contagem_sequencias) / total_grupos
+    variancia_seq = sum((x - media_sequencias) ** 2 for x in contagem_sequencias) / total_grupos
+    desvio_sequencias = variancia_seq ** 0.5
 
-        print("[ Testes estatísticos em 20 000 bytes gerados com a nossa chave ]")
-        print(f"  volume:         {formata(testes.aplicar(saida_em_volume(identificador, projeto)))}")
+    zeros = sequencia_bits.count('0')
+    uns = sequencia_bits.count('1')
+    valor_esperado = tamanho_total / 2
+
+    qui_quadrado = ((zeros - valor_esperado) ** 2 / valor_esperado) + ((uns - valor_esperado) ** 2 / valor_esperado)
+
+    return media_peso_hamming, desvio_sequencias, qui_quadrado
 
 if __name__ == "__main__":
-    relatorio()
+    dados_teste = {
+        "F01": ["2312", "3f82d9592c02", "23ad2dd622003772f51825ad2dd6280037"],
+        "S01": ["f20b4ee2a94adef11faba11de987fc1f9a5a0d94e047dabda34cdb5254"],
+        "S02": ["8dd53187c5733c9d730dac943dc8cd7268967c06e3d231ce807e3a917ca5a2"]
+    }
+    
+    for identificador in ["F01", "S01", "S02"]:
+        print(f"\n--- {identificador} ---")
+        
+        caixa_s, caixa_p, chave = importar_cifra(identificador)
+        
+        print("[ Efeito Avalanche ]")
+        for rodada in range(1, 9):
+            med, dp, nao_modficados = analisar_efeito_avalanche(
+                identificador, caixa_s, caixa_p, chave, rodada
+            )
+            print(f" R{rodada}: Med={med:.4f} | Desvio={dp:.4f} | Não modificados={nao_modficados}")
+            
+        print("[ Testes Estatísticos ]")
+        textos_cifrados = dados_teste.get(identificador, [])
+        for indice, texto in enumerate(textos_cifrados):
+            hw, dp_seq, qui2 = calcular_estatisticas(texto)
+            print(f" CT{indice+1}: Média_HW={hw:.4f} | DP_Corridas={dp_seq:.4f} | Qui-Quadrado={qui2:.4f}")

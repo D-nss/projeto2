@@ -1,5 +1,3 @@
-"""Modelo simples de texto usado pelos ataques para decidir se um candidato a texto claro parece português."""
-
 from math import log
 
 FREQUENCIAS = {

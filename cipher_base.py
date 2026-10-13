@@ -1,5 +1,3 @@
-"""Primitivas compartilhadas pelas cifras SPN e Feistel de 80 bits"""
-
 from collections.abc import Sequence
 
 
@@ -9,8 +7,6 @@ NIBBLE_SIZE = 4
 SBOX_ENTRIES = 1 << NIBBLE_SIZE
 MASK = (1 << BLOCK_SIZE) - 1
 HALF_MASK = (1 << HALF_SIZE) - 1
-
-# O número de rodadas é fixado pela atividade.
 SPN_ROUNDS = 4
 FEISTEL_ROUNDS = 8
 
@@ -20,7 +16,6 @@ def validate_block(value: int, name: str, width: int = BLOCK_SIZE) -> None:
 
 
 def sbox_layer(value: int, sbox: Sequence[int], nibble_count: int) -> int:
-    """Aplica a mesma S-box a nibble_count nibbles em paralelo, do menos significativo em diante."""
     result = 0
     for nibble_index in range(nibble_count):
         shift = NIBBLE_SIZE * nibble_index
@@ -30,7 +25,6 @@ def sbox_layer(value: int, sbox: Sequence[int], nibble_count: int) -> int:
 
 
 def permutation(value: int, pbox: Sequence[int]) -> int:
-    """Move o bit da posição origem para a posição pbox[origem]."""
     result = 0
     for source, target in enumerate(pbox):
         result |= ((value >> source) & 1) << target
@@ -38,7 +32,6 @@ def permutation(value: int, pbox: Sequence[int]) -> int:
 
 
 def rotl(value: int, bits: int, width: int = BLOCK_SIZE) -> int:
-    """Rotaciona value à esquerda em bits posições, dentro de um registrador de width bits."""
     mask = (1 << width) - 1
     value &= mask
     bits %= width
@@ -48,12 +41,10 @@ def rotl(value: int, bits: int, width: int = BLOCK_SIZE) -> int:
 
 
 def spn_round_keys(master_key: int, rounds: int) -> list[int]:
-    """A chave de rodada i é a chave secreta rotacionada i bits à esquerda, com XOR de i."""
     return [rotl(master_key, index) ^ index for index in range(rounds + 1)]
 
 
 def feistel_subkeys(master_key: int, rounds: int) -> list[int]:
-    """A subchave i combina com XOR as duas metades da chave secreta rotacionada i bits à esquerda, e depois faz XOR com o índice da rodada. Assim as duas metades da chave alcançam todas as rodadas."""
     subkeys = []
     for index in range(rounds):
         word = rotl(master_key, index)
