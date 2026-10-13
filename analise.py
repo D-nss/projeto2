@@ -32,7 +32,7 @@ def analisar_efeito_avalanche(identificador, caixa_s, caixa_p, chave, rodadas, t
     taxas_alteracao = []
     dependencias = [[0] * 80 for _ in range(80)]
 
-    for _ in range(total_amostras):
+    for k in range(total_amostras):
         texto_claro = random.getrandbits(80)
         texto_cifrado_base = cifra.encrypt_block(texto_claro)
 
