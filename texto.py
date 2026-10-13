@@ -7,8 +7,7 @@ FREQUENCIAS = {
     "z": 0.004, "j": 0.003, "x": 0.002, "k": 0.001, "w": 0.001, "y": 0.001,
 }
 
-
-def _tabela():
+def tabela():
     tabela = [log(1e-7)] * 256
     for codigo in range(0x20, 0x7F):
         tabela[codigo] = log(4e-4)
@@ -28,13 +27,10 @@ def _tabela():
             tabela[ord(letra.upper())] = log(frequencia * 0.04)
     return tabela
 
-
-LOG_PROB = _tabela()
-
+LOG_PROB = tabela()
 
 def pontuar(dados):
     return sum(LOG_PROB[byte] for byte in dados)
-
 
 def legivel(dados):
     return "".join(chr(byte) if 0x20 <= byte < 0x7F else "." for byte in dados)
